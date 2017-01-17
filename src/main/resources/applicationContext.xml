@@ -14,13 +14,13 @@
 
 
             <!-- for database configuration -->
-            <import resource="classpath*:/config/db-configuration.xml">
+            <!-- import resource="classpath*:/config/db-configuration.xml"-->
 
                 <!-- for spring-security-with-oauth configuration -->
                 <import resource="classpath*:/config/spring-security-oauth2.xml">
 
                 </import>
-            </import>
+            <!--/import-->
         </context:component-scan>
     </context:annotation-config>
 </beans>
