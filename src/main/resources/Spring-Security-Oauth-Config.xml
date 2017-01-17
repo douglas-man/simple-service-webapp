@@ -1,0 +1,133 @@
+<beans xmlns:context="http://www.springframework.org/schema/context"
+       xmlns:oauth="http://www.springframework.org/schema/security/oauth2"
+       xmlns:sec="http://www.springframework.org/schema/security" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+       xmlns="http://www.springframework.org/schema/beans" xsi:schemalocation="http://www.springframework.org/schema/security/oauth2 http://www.springframework.org/schema/security/spring-security-oauth2-1.0.xsd
+        http://www.springframework.org/schema/security http://www.springframework.org/schema/security/spring-security-3.2.xsd
+        http://www.springframework.org/schema/beans http://www.springframework.org/schema/beans/spring-beans.xsd
+        http://www.springframework.org/schema/context http://www.springframework.org/schema/context/spring-context.xsd">
+
+    <!-- Create client details bean for manage client details from database -->
+    <!-- The JdbcClientDetailsService provide default implementation for fetching
+     the data from oauth_client_details table Other wise we need to create our
+     custom class that Implement ClientDetailsService Interface and override its
+     loadClientByClientId method -->
+    <bean class="org.springframework.security.oauth2.provider.client.JdbcClientDetailsService" id="clientDetails">
+        <constructor-arg index="0">
+            <ref bean="dataSource">
+            </ref>
+        </constructor-arg>
+    </bean>     <!-- Configure Authentication manager -->
+    <bean class="org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder" id="passwordEncoder">
+        <constructor-arg name="strength" value="11"></constructor-arg>
+    </bean>   <!-- This class is the custom implementation of UserDetailSerive Interface
+  that provide by the spring, which we Need to implement and override its method.
+  But for Oauth spring provide us ClientDetailsUserDetailsService, which already
+  implement UserDetailSerive Interface and override its method. -->
+    <bean class="org.springframework.security.oauth2.provider.client.ClientDetailsUserDetailsService"
+          id="clientDetailsUserService">
+        <constructor-arg ref="clientDetails"></constructor-arg>
+    </bean>
+    <sec:authentication-manager alias="authenticationManager">
+        <sec:authentication-provider user-service-ref="clientDetailsUserService">
+            <sec:password-encoder ref="passwordEncoder"></sec:password-encoder>
+        </sec:authentication-provider>
+    </sec:authentication-manager>   <!-- Oauth Token Service Using Database -->  <!-- The JdbcTokenStore class provide the default implementation from access
+  the token from database. If we want to customize the JDBC implementation
+  we need to implement TokenStore interface and overrider its methods -->
+    <bean class="org.springframework.security.oauth2.provider.token.store.JdbcTokenStore" id="tokenStore">
+        <constructor-arg ref="dataSource"></constructor-arg>
+    </bean>   <!-- This the service class which is used to access the function of JdbcTokenStore
+  class. This is like MVC structure JdbcTokenStore is Dao layer and DefaultTokenServices
+  is service layer -->
+    <bean class="org.springframework.security.oauth2.provider.token.DefaultTokenServices" id="tokenServices">
+        <property name="tokenStore" ref="tokenStore">
+            <property name="supportRefreshToken" value="true">
+                <property name="clientDetailsService" ref="clientDetails">
+                    <property name="accessTokenValiditySeconds" value="4500"></property>
+                </property>
+            </property>
+        </property>
+    </bean>   <!-- A user approval handler that remembers approval decisions by consulting
+  existing tokens -->
+    <bean class="org.springframework.security.oauth2.provider.request.DefaultOAuth2RequestFactory"
+          id="oAuth2RequestFactory">
+        <constructor-arg ref="clientDetails"></constructor-arg>
+    </bean>
+    <bean class="org.springframework.security.oauth2.provider.approval.TokenStoreUserApprovalHandler"
+          id="userApprovalHandler">
+        <property name="requestFactory" ref="oAuth2RequestFactory">
+            <property name="tokenStore" ref="tokenStore"></property>
+        </property>
+    </bean>   <!-- Authorization Server Configuration of the server is used to provide
+  implementations of the client details service and token services and to enable
+  or disable certain aspects of the mechanism globally. -->
+    <oauth:authorization-server client-details-service-ref="clientDetails" token-services-ref="tokenServices"
+                                user-approval-handler-ref="userApprovalHandler">
+        <oauth:authorization-code>
+            <oauth:implicit>
+                <oauth:refresh-token>
+                    <oauth:client-credentials>
+                        <oauth:password authentication-manager-ref="authenticationManager"></oauth:password>
+                    </oauth:client-credentials>
+                </oauth:refresh-token>
+            </oauth:implicit>
+        </oauth:authorization-code>
+    </oauth:authorization-server>   <!-- A Resource Server serves resources that are protected by the OAuth2
+  token. Spring OAuth provides a Spring Security authentication filter that
+  implements this protection. -->
+    <oauth:resource-server id="resourceServerFilter" resource-id="rest_api" token-services-ref="tokenServices">   <!-- Grants access if only grant (or abstain) votes were received. We can
+  protect REST resource methods with JSR-250 annotations such as @RolesAllowed -->
+        <bean class="org.springframework.security.access.vote.UnanimousBased" id="accessDecisionManager">
+            <property name="decisionVoters">
+                <list>
+                    <bean class="org.springframework.security.access.annotation.Jsr250Voter"></bean>
+                </list>
+            </property>
+        </bean>   <!-- If authentication fails and the caller has asked for a specific content
+  type response, this entry point can send one, along with a standard 401 status -->
+        <bean class="org.springframework.security.oauth2.provider.error.OAuth2AuthenticationEntryPoint"
+              id="clientAuthenticationEntryPoint">
+            <property name="realmName" value="Authorization/client">
+                <property name="typeName" value="Basic"></property>
+            </property>
+        </bean>
+        <bean class="org.springframework.security.oauth2.provider.error.OAuth2AuthenticationEntryPoint"
+              id="oauthAuthenticationEntryPoint">
+            <property name="realmName" value="Authorization"></property>
+        </bean>
+        <bean class="org.springframework.security.oauth2.provider.error.OAuth2AccessDeniedHandler"
+              id="oauthAccessDeniedHandler">   <!-- Allows clients to authenticate using request parameters if included
+  as a security filter. It is recommended by the specification that you permit
+  HTTP basic authentication for clients, and not use this filter at all. -->
+            <bean class="org.springframework.security.oauth2.provider.client.ClientCredentialsTokenEndpointFilter"
+                  id="clientCredentialsTokenEndpointFilter">
+                <property name="authenticationManager" ref="authenticationManager"></property>
+            </bean>
+            <bean class="org.springframework.security.oauth2.client.filter.OAuth2ClientContextFilter"
+                  id="oAuth2ClientContextFilter"></bean>
+            <sec:http authentication-manager-ref="authenticationManager" create-session="stateless"
+                      pattern="/oauth/token">
+                <sec:intercept-url access="IS_AUTHENTICATED_ANONYMOUSLY" pattern="/oauth/token">
+                    <sec:http-basic entry-point-ref="clientAuthenticationEntryPoint">
+                        <sec:custom-filter before="BASIC_AUTH_FILTER" ref="clientCredentialsTokenEndpointFilter">
+                            <sec:custom-filter after="EXCEPTION_TRANSLATION_FILTER " ref="oAuth2ClientContextFilter">
+                                <sec:access-denied-handler ref="oauthAccessDeniedHandler"></sec:access-denied-handler>
+                            </sec:custom-filter>
+                        </sec:custom-filter>
+                    </sec:http-basic>
+                </sec:intercept-url>
+            </sec:http>
+            <sec:http authentication-manager-ref="authenticationManager" create-session="never" pattern="/rest/**">
+                <sec:anonymous enabled="false">
+                    <sec:intercept-url access="ROLE_USER" method="GET" pattern="/rest/**">
+                        <sec:custom-filter before="PRE_AUTH_FILTER" ref="resourceServerFilter">
+                            <sec:http-basic entry-point-ref="oauthAuthenticationEntryPoint">
+                                <sec:access-denied-handler ref="oauthAccessDeniedHandler"></sec:access-denied-handler>
+                            </sec:http-basic>
+                        </sec:custom-filter>
+                    </sec:intercept-url>
+                </sec:anonymous>
+            </sec:http>
+        </bean>
+    </oauth:resource-server>
+</beans>
